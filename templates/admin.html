@@ -1,44 +1,340 @@
-<!DOCTYPE html>
-<html lang="uz">
-<head>
-  <meta charset="UTF-8">
-  <title>Admin panel</title>
-</head>
-<body>
+{% extends 'base.html' %}
 
-<h2>Admin Panel</h2>
+{% block title %}Admin Panel{% endblock %}
 
-<button onclick="nextUser()">Next</button>
+{% block content %}
+{% if not user.is_staff %}
+    <div class="alert alert-danger">
+        <h4>🔐 Kirish huquqi yo'q</h4>
+        <p>Faqat administratorlar ushbu sahifaga kira oladi.</p>
+        <a href="{% url 'index' %}" class="btn btn-primary">Bosh sahifaga qaytish</a>
+    </div>
+{% else %}
+<div class="row">
+    <!-- Chap sidebar - Filial va xizmat filterlari -->
+    <div class="col-lg-3 mb-4">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">⚙️ Sozlamalar</h5>
+            </div>
+            <div class="card-body">
+                <form id="adminFilterForm">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Filial</label>
+                        <select class="form-select" id="adminBranch">
+                            <option value="">Barcha filiallar</option>
+                            {% for branch in branches %}
+                                <option value="{{ branch.id }}">{{ branch.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Xizmat</label>
+                        <select class="form-select" id="adminService">
+                            <option value="">Barcha xizmatlar</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Holat</label>
+                        <select class="form-select" id="adminStatus">
+                            <option value="">Barchasi</option>
+                            <option value="waiting">Kutilmoqda</option>
+                            <option value="active" selected>Jarayonda</option>
+                            <option value="done">Tugallangan</option>
+                        </select>
+                    </div>
+                    
+                    <button type="button" class="btn btn-primary w-100" onclick="loadAdminQueues()">
+                        🔍 Yangilash
+                    </button>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Tezkor statistika -->
+        <div class="card mt-3">
+            <div class="card-body">
+                <h6 class="card-title">📊 Statistika</h6>
+                <div id="statsContainer">
+                    <p class="text-muted small">Yuklanmoqda...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- O'ng qism - Navbatlar va boshqaruv -->
+    <div class="col-lg-9">
+        <!-- Keyingi odamni chaqirish -->
+        <div class="card mb-4 border-primary">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">🔔 Keyingi Foydalanuvchi</h5>
+                <span class="badge bg-light text-primary" id="currentTime"></span>
+            </div>
+            <div class="card-body text-center py-4">
+                <div id="nextQueueDisplay">
+                    <p class="text-muted">Navbat bo'sh yoki hali tanlanmagan</p>
+                </div>
+                <button class="btn btn-success btn-lg mt-3" id="callNextBtn" onclick="callNextQueue()">
+                    📢 Keyingisini Chaqirish
+                </button>
+                <div class="loading mt-3" id="callLoading">
+                    <div class="spinner-border text-success"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Barcha navbatlar jadvali -->
+        <div class="card">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">📋 Barcha Navbatlar</h5>
+                <button class="btn btn-sm btn-outline-secondary" onclick="loadAdminQueues()">🔄 Yangilash</button>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>#</th>
+                                <th>Foydalanuvchi</th>
+                                <th>Xizmat</th>
+                                <th>Filial</th>
+                                <th>Holat</th>
+                                <th>Vaqt</th>
+                                <th>Amal</th>
+                            </tr>
+                        </thead>
+                        <tbody id="adminQueueTable">
+                            <tr><td colspan="7" class="text-center py-4">Yuklanmoqda...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
 
-<div id="list"></div>
-
+{% block extra_js %}
 <script>
-function loadQueues() {
-  fetch("http://127.0.0.1:8000/queue/list/")
-    .then(res => res.json())
-    .then(data => {
-      const list = document.getElementById("list");
-      list.innerHTML = "";
+// Vaqtni yangilash
+function updateTime() {
+    document.getElementById('currentTime').textContent = 
+        new Date().toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+setInterval(updateTime, 1000);
+updateTime();
 
-      data.forEach(q => {
-        const div = document.createElement("div");
-        div.innerHTML = `
-          <p>${q.service.name} - #${q.number} (${q.status})</p>
-          <hr>
-        `;
-        list.appendChild(div);
-      });
-    });
+// Filial o'zgarganda xizmatlarni yuklash
+document.getElementById('adminBranch')?.addEventListener('change', async function() {
+    const branchId = this.value;
+    const serviceSelect = document.getElementById('adminService');
+
+    serviceSelect.innerHTML = '<option>Yuklanmoqda...</option>';
+
+    if (!branchId) {
+        serviceSelect.innerHTML = '<option value="">Barcha xizmatlar</option>';
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/services/?branch_id=${branchId}`);
+        const services = await response.json();
+
+        serviceSelect.innerHTML = '<option value="">Barcha xizmatlar</option>';
+        services.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.id;
+            opt.textContent = s.name;
+            serviceSelect.appendChild(opt);
+        });
+    } catch (err) {
+        serviceSelect.innerHTML = '<option>Xatolik</option>';
+    }
+});
+
+// Admin navbatlarini yuklash
+async function loadAdminQueues() {
+    const tbody = document.getElementById('adminQueueTable');
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
+
+    try {
+        const params = new URLSearchParams();
+        const branch = document.getElementById('adminBranch').value;
+        const service = document.getElementById('adminService').value;
+        const status = document.getElementById('adminStatus').value;
+
+        if (branch) params.append('branch_id', branch);
+        if (service) params.append('service_id', service);
+        if (status) params.append('status', status);
+
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/queue/list/?${params}`, {
+            headers: { 'Authorization': `Token ${token}` }
+        });
+        const queues = await response.json();
+
+        if (queues.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">Navbatlar topilmadi</td></tr>';
+            updateStats({});
+            return;
+        }
+
+        tbody.innerHTML = queues.map(q => `
+            <tr>
+                <td><strong>#${q.number}</strong></td>
+                <td>${q.user}<br><small class="text-muted">${q.user_phone || ''}</small></td>
+                <td>${q.service.name}</td>
+                <td>${q.branch.name}</td>
+                <td><span class="badge bg-${getStatusColor(q.status)}">${getStatusText(q.status)}</span></td>
+                <td>${formatDate(q.created_at)}</td>
+                <td>
+                    ${q.status === 'active' ?
+                        `<button class="btn btn-sm btn-success" onclick="completeQueue(${q.id})">✓ Tugatish</button>` :
+                        (q.status === 'waiting' ?
+                            `<button class="btn btn-sm btn-outline-primary" onclick="activateQueue(${q.id})">▶️ Boshlash</button>` :
+                            '<span class="text-muted small">—</span>')}
+                </td>
+            </tr>
+        `).join('');
+
+        updateStats(queues);
+    } catch (err) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-danger">Yuklashda xatolik</td></tr>';
+    }
 }
 
-function nextUser() {
-  fetch("http://127.0.0.1:8000/queue/next/", {
-    method: "POST"
-  }).then(() => loadQueues());
+// Statistika yangilash
+function updateStats(queues) {
+    const container = document.getElementById('statsContainer');
+    if (!container) return;
+
+    const stats = {
+        waiting: queues.filter(q => q.status === 'waiting').length,
+        active: queues.filter(q => q.status === 'active').length,
+        done: queues.filter(q => q.status === 'done').length
+    };
+
+    container.innerHTML = `
+        <div class="d-flex justify-content-between small mb-1">
+            <span>⏳ Kutilmoqda:</span>
+            <strong class="text-warning">${stats.waiting}</strong>
+        </div>
+        <div class="d-flex justify-content-between small mb-1">
+            <span>🔄 Jarayonda:</span>
+            <strong class="text-info">${stats.active}</strong>
+        </div>
+        <div class="d-flex justify-content-between small">
+            <span>✅ Tugallangan:</span>
+            <strong class="text-success">${stats.done}</strong>
+        </div>
+    `;
 }
 
-loadQueues();
+// Keyingisini chaqirish
+async function callNextQueue() {
+    const btn = document.getElementById('callNextBtn');
+    const loading = document.getElementById('callLoading');
+
+    btn.disabled = true;
+    loading.classList.add('show');
+
+    try {
+        const params = {};
+        const branch = document.getElementById('adminBranch').value;
+        const service = document.getElementById('adminService').value;
+        if (branch) params.branch_id = parseInt(branch);
+        if (service) params.service_id = parseInt(service);
+
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/queue/next/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Token ${token}`,
+                'X-CSRFToken': csrftoken
+            },
+            body: JSON.stringify(params)
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.data) {
+            document.getElementById('nextQueueDisplay').innerHTML = `
+                <div class="queue-number">#${data.data.number}</div>
+                <h5 class="mt-2">${data.data.user}</h5>
+                <p class="text-muted mb-0">${data.data.service.name} • ${data.data.branch.name}</p>
+                <span class="badge bg-info mt-2">Jarayonda</span>
+            `;
+            loadAdminQueues();
+        } else {
+            document.getElementById('nextQueueDisplay').innerHTML =
+                '<p class="text-muted">Navbat bo\'sh</p>';
+        }
+    } catch (err) {
+        alert('Xatolik yuz berdi');
+    } finally {
+        btn.disabled = false;
+        loading.classList.remove('show');
+    }
+}
+
+// Navbatni tugatish
+async function completeQueue(queueId) {
+    if (!confirm('Bu navbatni tugatildi deb belgilamoqchimisiz?')) return;
+
+    try {
+        const token = localStorage.getItem('token');
+        await fetch(`/api/queue/${queueId}/complete/`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Token ${token}`,
+                'X-CSRFToken': csrftoken
+            }
+        });
+        loadAdminQueues();
+    } catch (err) {
+        alert('Xatolik yuz berdi');
+    }
+}
+
+// Navbatni faollashtirish
+async function activateQueue(queueId) {
+    try {
+        const token = localStorage.getItem('token');
+        await fetch(`/api/queue/${queueId}/activate/`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Token ${token}`,
+                'X-CSRFToken': csrftoken
+            }
+        });
+        loadAdminQueues();
+    } catch (err) {
+        alert('Xatolik yuz berdi');
+    }
+}
+
+// Helper functions
+function getStatusColor(status) {
+    return { waiting: 'warning', active: 'info', done: 'success', cancelled: 'secondary' }[status] || 'secondary';
+}
+function getStatusText(status) {
+    return { waiting: 'Kutilmoqda', active: 'Jarayonda', done: 'Tugallangan', cancelled: 'Bekor qilingan' }[status] || status;
+}
+function formatDate(str) {
+    return new Date(str).toLocaleString('uz-UZ', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    if (document.getElementById('adminQueueTable')) {
+        loadAdminQueues();
+        // Har 30 soniyada avto-yangilash
+        setInterval(loadAdminQueues, 30000);
+    }
+});
 </script>
-
-</body>
-</html>
+{% endblock %}

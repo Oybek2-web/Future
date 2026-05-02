@@ -1,63 +1,231 @@
-<!DOCTYPE html>
-<html lang="uz">
-<head>
-  <meta charset="UTF-8">
-  <title>Navbat olish</title>
-  <style>
-    body {
-      font-family: Arial;
-      background: #f4f4f4;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-    }
-    .card {
-      background: white;
-      padding: 20px;
-      border-radius: 10px;
-      width: 300px;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
-    }
-    input, button {
-      width: 100%;
-      padding: 10px;
-      margin-top: 10px;
-    }
-    button {
-      background: blue;
-      color: white;
-      border: none;
-      cursor: pointer;
-    }
-  </style>
-</head>
-<body>
+{% extends 'base.html' %}
 
-<div class="card">
-  <h2>Navbat olish</h2>
-  <input type="number" id="service_id" placeholder="Service ID">
-  <button onclick="getQueue()">Navbat olish</button>
+{% block title %}Navbat Olish{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <!-- Navbat olish formasi -->
+        <div class="card mb-4">
+            <div class="card-body p-4">
+                <h3 class="card-title text-center mb-4">🎫 Navbatga Yozilish</h3>
+                
+                <form id="queueForm">
+                    {% csrf_token %}
+                    
+                    <!-- Filial tanlash -->
+                    <div class="mb-3">
+                        <label for="branch" class="form-label fw-bold">Filialni tanlang</label>
+                        <select class="form-select form-select-lg" id="branch" required>
+                            <option value="">Filialni tanlang...</option>
+                            {% for branch in branches %}
+                                <option value="{{ branch.id }}">{{ branch.name }} - {{ branch.address }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <!-- Xizmat tanlash -->
+                    <div class="mb-4">
+                        <label for="service" class="form-label fw-bold">Xizmatni tanlang</label>
+                        <select class="form-select form-select-lg" id="service" required disabled>
+                            <option value="">Avval filialni tanlang</option>
+                        </select>
+                        <div class="form-text">Tanlangan filialdagi mavjud xizmatlar</div>
+                    </div>
+                    
+                    <!-- Submit button -->
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary btn-lg" id="submitBtn">
+                            🎫 Navbatga Yozilish
+                        </button>
+                    </div>
+                </form>
+                
+                <!-- Loading indicator -->
+                <div class="loading" id="loading">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Yuklanmoqda...</span>
+                    </div>
+                    <p class="mt-2">Navbat yaratilmoqda...</p>
+                </div>
+                
+                <!-- Success message -->
+                <div id="successMessage" class="alert alert-success mt-3 d-none">
+                    <h5 class="alert-heading">✅ Muvaffaqiyatli!</h5>
+                    <p class="mb-0">Sizning navbat raqamingiz: <strong class="queue-number" id="queueNumber">#000</strong></p>
+                    <hr>
+                    <p class="mb-0 small">Iltimos, navbatingiz kelguncha kuting.</p>
+                </div>
+                
+                <!-- Error message -->
+                <div id="errorMessage" class="alert alert-danger mt-3 d-none">
+                    <h5 class="alert-heading">❌ Xatolik!</h5>
+                    <p class="mb-0" id="errorText"></p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Joriy navbatlar -->
+        {% if user.is_authenticated %}
+        <div class="card">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">📋 Sizning navbatlaringiz</h5>
+            </div>
+            <div class="card-body">
+                <div id="myQueuesList">
+                    <div class="text-center text-muted">Yuklanmoqda...</div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
 </div>
+{% endblock %}
 
+{% block extra_js %}
 <script>
-function getQueue() {
-  const service_id = document.getElementById("service_id").value;
-
-  fetch("http://127.0.0.1:8000/queue/", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": "Token YOUR_TOKEN"
-    },
-    body: JSON.stringify({ service_id: service_id })
-  })
-  .then(res => res.json())
-  .then(data => {
-    alert("Sizning navbat raqamingiz: " + data.number);
-  });
-}
+document.addEventListener('DOMContentLoaded', function() {
+    const branchSelect = document.getElementById('branch');
+    const serviceSelect = document.getElementById('service');
+    const queueForm = document.getElementById('queueForm');
+    const loading = document.getElementById('loading');
+    const successMsg = document.getElementById('successMessage');
+    const errorMsg = document.getElementById('errorMessage');
+    const submitBtn = document.getElementById('submitBtn');
+    
+    // Filial o'zgarganda xizmatlarni yuklash
+    branchSelect.addEventListener('change', async function() {
+        const branchId = this.value;
+        serviceSelect.disabled = true;
+        serviceSelect.innerHTML = '<option>Yuklanmoqda...</option>';
+        
+        if (!branchId) {
+            serviceSelect.innerHTML = '<option value="">Avval filialni tanlang</option>';
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/services/?branch_id=${branchId}`, {
+                headers: { 'Accept': 'application/json' }
+            });
+            const services = await response.json();
+            
+            serviceSelect.innerHTML = '<option value="">Xizmatni tanlang...</option>';
+            services.forEach(service => {
+                const option = document.createElement('option');
+                option.value = service.id;
+                option.textContent = `${service.name} (~${service.duration} daqiqa)`;
+                serviceSelect.appendChild(option);
+            });
+            serviceSelect.disabled = false;
+        } catch (err) {
+            serviceSelect.innerHTML = '<option>Xatolik yuz berdi</option>';
+            showError('Xizmatlarni yuklashda xatolik');
+        }
+    });
+    
+    // Form submit
+    queueForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const serviceId = serviceSelect.value;
+        const branchId = branchSelect.value;
+        
+        if (!serviceId || !branchId) {
+            showError('Iltimos, filial va xizmatni tanlang');
+            return;
+        }
+        
+        // UI holatini o'zgartirish
+        submitBtn.disabled = true;
+        loading.classList.add('show');
+        successMsg.classList.add('d-none');
+        errorMsg.classList.add('d-none');
+        
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch('/api/queue/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Token ${token}`
+                },
+                body: JSON.stringify({ service_id: parseInt(serviceId), branch_id: parseInt(branchId) })
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok) {
+                document.getElementById('queueNumber').textContent = `#${data.number}`;
+                successMsg.classList.remove('d-none');
+                queueForm.reset();
+                serviceSelect.disabled = true;
+                loadMyQueues();
+            } else {
+                showError(data.error || data.detail || 'Navbat yaratishda xatolik');
+            }
+        } catch (err) {
+            showError('Tarmoq xatoligi yuz berdi');
+        } finally {
+            submitBtn.disabled = false;
+            loading.classList.remove('show');
+        }
+    });
+    
+    // Xatolikni ko'rsatish
+    function showError(message) {
+        document.getElementById('errorText').textContent = message;
+        errorMsg.classList.remove('d-none');
+        setTimeout(() => errorMsg.classList.add('d-none'), 5000);
+    }
+    
+    // Mening navbatlarimni yuklash
+    async function loadMyQueues() {
+        const container = document.getElementById('myQueuesList');
+        if (!container) return;
+        
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch('/api/queue/my/', {
+                headers: { 'Authorization': `Token ${token}` }
+            });
+            const queues = await response.json();
+            
+            if (queues.length === 0) {
+                container.innerHTML = '<p class="text-muted mb-0">Hozircha faol navbatlaringiz yo\'q</p>';
+                return;
+            }
+            
+            container.innerHTML = queues.map(q => `
+                <div class="d-flex justify-content-between align-items-center p-3 border-bottom">
+                    <div>
+                        <strong>#${q.number}</strong> - ${q.service.name}<br>
+                        <small class="text-muted">${q.branch.name}</small>
+                    </div>
+                    <span class="badge bg-${getStatusColor(q.status)} status-${q.status}">
+                        ${getStatusText(q.status)}
+                    </span>
+                </div>
+            `).join('');
+        } catch (err) {
+            container.innerHTML = '<p class="text-danger mb-0">Yuklashda xatolik</p>';
+        }
+    }
+    
+    function getStatusColor(status) {
+        const colors = { waiting: 'warning', active: 'info', done: 'success', cancelled: 'secondary' };
+        return colors[status] || 'secondary';
+    }
+    
+    function getStatusText(status) {
+        const texts = { waiting: 'Kutilmoqda', active: 'Jarayonda', done: 'Tugallangan', cancelled: 'Bekor qilingan' };
+        return texts[status] || status;
+    }
+    
+    // Sahifa yuklanganda navbatlarni ko'rsatish
+    if (document.getElementById('myQueuesList')) {
+        loadMyQueues();
+    }
+});
 </script>
-
-</body>
-</html>
+{% endblock %}

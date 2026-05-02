@@ -1,36 +1,202 @@
-<!DOCTYPE html>
-<html lang="uz">
-<head>
-  <meta charset="UTF-8">
-  <title>Mening navbatim</title>
-</head>
-<body>
+{% extends 'base.html' %}
 
-<h2>Mening navbatlarim</h2>
-<div id="list"></div>
+{% block title %}Mening Navbatlarim{% endblock %}
 
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h3>📋 Mening Navbatlarim</h3>
+            <a href="{% url 'index' %}" class="btn btn-outline-primary">➕ Yangi navbat</a>
+        </div>
+        
+        <!-- Filterlar -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <select class="form-select" id="statusFilter">
+                            <option value="">Barcha holatlar</option>
+                            <option value="waiting">Kutilmoqda</option>
+                            <option value="active">Jarayonda</option>
+                            <option value="done">Tugallangan</option>
+                            <option value="cancelled">Bekor qilingan</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <select class="form-select" id="branchFilter">
+                            <option value="">Barcha filiallar</option>
+                            {% for branch in branches %}
+                                <option value="{{ branch.id }}">{{ branch.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <button class="btn btn-primary w-100" onclick="loadQueues()">🔍 Filtrlash</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Navbatlar ro'yxati -->
+        <div class="card">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>#</th>
+                                <th>Xizmat</th>
+                                <th>Filial</th>
+                                <th>Holat</th>
+                                <th>Vaqt</th>
+                                <th>Amallar</th>
+                            </tr>
+                        </thead>
+                        <tbody id="queuesTableBody">
+                            <tr>
+                                <td colspan="6" class="text-center py-4">
+                                    <div class="spinner-border text-primary" role="status"></div>
+                                    <p class="mt-2 mb-0">Yuklanmoqda...</p>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Pagination -->
+        <nav id="pagination" class="mt-3"></nav>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
 <script>
-fetch("http://127.0.0.1:8000/queue/my/", {
-  headers: {
-    "Authorization": "Token YOUR_TOKEN"
-  }
-})
-.then(res => res.json())
-.then(data => {
-  const list = document.getElementById("list");
+let currentPage = 1;
 
-  data.forEach(q => {
-    const div = document.createElement("div");
-    div.innerHTML = `
-      <p>Service: ${q.service.name}</p>
-      <p>Number: ${q.number}</p>
-      <p>Status: ${q.status}</p>
-      <hr>
-    `;
-    list.appendChild(div);
-  });
+async function loadQueues(page = 1) {
+    const tbody = document.getElementById('queuesTableBody');
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>`;
+    
+    try {
+        const token = localStorage.getItem('token');
+        const params = new URLSearchParams({ page });
+        
+        const status = document.getElementById('statusFilter').value;
+        const branch = document.getElementById('branchFilter').value;
+        if (status) params.append('status', status);
+        if (branch) params.append('branch_id', branch);
+        
+        const response = await fetch(`/api/queue/list/?${params}`, {
+            headers: { 'Authorization': `Token ${token}` }
+        });
+        const data = await response.json();
+        
+        if (data.results && data.results.length > 0) {
+            tbody.innerHTML = data.results.map(queue => `
+                <tr>
+                    <td><strong>#${queue.number}</strong></td>
+                    <td>${queue.service.name}</td>
+                    <td>${queue.branch.name}</td>
+                    <td><span class="badge bg-${getStatusColor(queue.status)}">${getStatusText(queue.status)}</span></td>
+                    <td>${formatDate(queue.created_at)}</td>
+                    <td>
+                        ${queue.status === 'waiting' ? 
+                            `<button class="btn btn-sm btn-outline-danger" onclick="cancelQueue(${queue.id})">Bekor qilish</button>` 
+                            : '<span class="text-muted small">—</span>'}
+                    </td>
+                </tr>
+            `).join('');
+            
+            // Pagination
+            renderPagination(data.count, data.next, data.previous, page);
+        } else {
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">Navbatlar topilmadi</td></tr>';
+        }
+    } catch (err) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-danger">Yuklashda xatolik yuz berdi</td></tr>';
+    }
+}
+
+function renderPagination(count, next, prev, current) {
+    const pagination = document.getElementById('pagination');
+    const totalPages = Math.ceil(count / 10);
+    
+    if (totalPages <= 1) {
+        pagination.innerHTML = '';
+        return;
+    }
+    
+    let html = '<ul class="pagination justify-content-center mb-0">';
+    if (prev) html += `<li class="page-item"><a class="page-link" href="#" onclick="loadQueues(${current-1});return false;">«</a></li>`;
+    else html += '<li class="page-item disabled"><span class="page-link">«</span></li>';
+    
+    for (let i = 1; i <= totalPages; i++) {
+        if (i === current) html += `<li class="page-item active"><span class="page-link">${i}</span></li>`;
+        else html += `<li class="page-item"><a class="page-link" href="#" onclick="loadQueues(${i});return false;">${i}</a></li>`;
+    }
+    
+    if (next) html += `<li class="page-item"><a class="page-link" href="#" onclick="loadQueues(${current+1});return false;">»</a></li>`;
+    else html += '<li class="page-item disabled"><span class="page-link">»</span></li>';
+    html += '</ul>';
+    
+    pagination.innerHTML = html;
+}
+
+async function cancelQueue(queueId) {
+    if (!confirm('Haqiqatan ham bu navbatni bekor qilmoqchimisiz?')) return;
+    
+    try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('/api/queue/cancel/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Token ${token}`,
+                'X-CSRFToken': csrftoken
+            },
+            body: JSON.stringify({ queue_id: queueId })
+        });
+        
+        if (response.ok) {
+            loadQueues(currentPage);
+            alert('✅ Navbat bekor qilindi');
+        } else {
+            const data = await response.json();
+            alert('❌ ' + (data.error || 'Xatolik yuz berdi'));
+        }
+    } catch (err) {
+        alert('❌ Tarmoq xatoligi');
+    }
+}
+
+function getStatusColor(status) {
+    const colors = { waiting: 'warning', active: 'info', done: 'success', cancelled: 'secondary' };
+    return colors[status] || 'secondary';
+}
+
+function getStatusText(status) {
+    const texts = { waiting: 'Kutilmoqda', active: 'Jarayonda', done: 'Tugallangan', cancelled: 'Bekor qilingan' };
+    return texts[status] || status;
+}
+
+function formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleString('uz-UZ', { 
+        day: '2-digit', month: '2-digit', 
+        hour: '2-digit', minute: '2-digit' 
+    });
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    loadQueues();
+    
+    // Filter change handlers
+    document.getElementById('statusFilter').addEventListener('change', () => loadQueues(1));
+    document.getElementById('branchFilter').addEventListener('change', () => loadQueues(1));
 });
 </script>
-
-</body>
-</html>
+{% endblock %}

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8">
+  <title>Navbat olish</title>
+  <style>
+    body {
+      font-family: Arial;
+      background: #f4f4f4;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    .card {
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      width: 300px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    input, button {
+      width: 100%;
+      padding: 10px;
+      margin-top: 10px;
+    }
+    button {
+      background: blue;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h2>Navbat olish</h2>
+  <input type="number" id="service_id" placeholder="Service ID">
+  <button onclick="getQueue()">Navbat olish</button>
+</div>
+
+<script>
+function getQueue() {
+  const service_id = document.getElementById("service_id").value;
+
+  fetch("http://127.0.0.1:8000/queue/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Token YOUR_TOKEN"
+    },
+    body: JSON.stringify({ service_id: service_id })
+  })
+  .then(res => res.json())
+  .then(data => {
+    alert("Sizning navbat raqamingiz: " + data.number);
+  });
+}
+</script>
+
+</body>
+</html>
